@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<launch>
+
+  <!-- x = x-coordinate, y = y-coordinate, z = z-coordinate, R = Roll, P = Pitch, Y = Yaw-->
+  <arg name="init_pose" value="-x -4.5 -y 2 -z 0 -R 0 -P 0 -Y 0" />
+  
+
+  <!-- SPAWN ROBOT 1-->
+  <group ns="two_wheeled_robot">
+    <param name="robot_description" command="$(find xacro)/xacro.py '$(find bug_algorithms_gazebo)/urdf/two_wheeled_robot/robot.xacro'"/>
+    <node name="robot_spawn" pkg="gazebo_ros" type="spawn_model"
+     args="$(arg init_pose) -urdf -param robot_description -model two_wheeled_robot"
+     respawn="false" output="screen" />
+
+    <node pkg="robot_state_publisher" type="robot_state_publisher" 
+          name="robot_state_publisher" output="screen"/>
+  </group>
+
+    <!-- virual bot, create a object of the class bot -->
+  <node name="virtual_robot_spawn" pkg="bug_algorithms_gazebo" type="spawn_virtual_bot.py" output="screen"/>
+
+  <node name="pose_listener" pkg="bug_algorithms_gazebo" type="listening_coordinate.py" />
+
+</launch>
