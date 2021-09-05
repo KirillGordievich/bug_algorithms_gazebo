@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import rospy
-from class_bot import Robot
+from class_robot import Robot
 
 
 if __name__ == "__main__":

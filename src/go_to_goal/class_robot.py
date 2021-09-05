@@ -22,7 +22,8 @@ class Robot:
 
         self.count_time = 0 # using count_time to count seconds the robot is in a state 
         self.count_loop = 0 # using in timer
-
+  
+        self.turn_left_mode = True # False if you want to turn rigth
         self.closest_point = None # for bug1
         self.starting_point = None # for bug1
         self.bug1_steps = {'go to point': True, 'circumnavigate obstacle': False, 'go to closest point': False}
@@ -46,8 +47,8 @@ class Robot:
         self.max_angle_error = 0.06 # in radians 
  
         # for PD controller
-        self.angle_past_error = 0 
-        self.angle_present_error = 0
+        self.yaw_past_error = 0 
+        self.yaw_present_error = 0
         self.distance_past_error = 0      
         self.distance_present_error = 0 
         self.k_p = 0.5 # the coefficient for the proportional terms
@@ -90,7 +91,7 @@ class Robot:
             rospy.loginfo('unknown status')
         linear, angular = self.get_velocity()
         self.vel_msg.linear.x = linear
-        self.vel.angular.z = angular
+        self.vel_msg.angular.z = angular
         self.velocity_pub.publish(self.vel_msg)
 
     def bug_1(self):
@@ -144,6 +145,7 @@ class Robot:
                 dist_to_closest_point = self.get_distance(self.closest_point[0], self.closest_point[1], pose_x, pose_y)
                 rospy.loginfo_throttle(1, 'distance to the closest point = ' + str(dist_to_closest_point))
                 if dist_to_closest_point < epsilon:
+                    # while robot heading differs from the desired heading by more than the yaw precision 
                     while math.fabs(self.get_err_yaw()) > self.yaw_precision:
                         linear, angular = 0, -0.25
                         self.vel_msg.linear.x = linear
@@ -183,27 +185,28 @@ class Robot:
 	x_goal, y_goal = point[0], point[1]
         pose = self.get_pose()
         distance = self.get_distance(x_goal, y_goal, pose[0], pose[1])
-        angle = self.get_angle(x_goal, y_goal)
-        rospy.loginfo('angle, get_err_yaw = [%s, %s]' % (angle, get_err_yaw()))
+        err_yaw = self.get_err_yaw()
         # stop if the agent is close to the goal
         if distance < self.distance_precision:
-           self.angle_past_error = 0
+           self.yaw_past_error = 0
            linear, angular = 0, 0
            self.distance_past_error = distance
-           rospy.loginfo('Current position = [%s, %s],  the goal: [%s, %s]' % (pose[0], pose[1], x_goal, y_goal))   
+           rospy.loginfo('Current position = [%s, %s],  the goal: [%s, %s]' % (pose[0], pose[1], x_goal, y_goal))
+           self.goal = [-6.1, 1.5]   
            rospy.signal_shutdown("The goal is reached")
-        elif abs(angle) < self.max_angle_error:
+        # robot heading differs from the desired heading by more than the yaw precision
+        elif math.fabs(err_yaw) < self.yaw_precision:
             # linear = K*error + D*(present_error - past_error)
             angular = 0
             linear = self.k_p*(distance) + self.k_d*abs(distance-self.distance_past_error)
-            self.angle_past_error = 0
+            self.yaw_past_error = 0
             self.distance_past_error = distance
 	else:
             # angular = K*error + D*(present_error - past_error)
             # linear = K*error + D*(present_error - past_error)
-	    angular = -(angle*self.k_p + self.k_d*abs(angle-self.angle_past_error))
+	    angular = -(err_yaw*self.k_p + self.k_d*abs(err_yaw-self.yaw_past_error))
             linear = self.k_p*(distance) + self.k_d*abs(distance-self.distance_past_error)
-            self.angle_past_error = angle
+            self.yaw_past_error = err_yaw
             self.distance_past_error = distance
         # speed must not be higher than maximum speed
         if abs(linear) > self.max_linear_velocity:
@@ -213,9 +216,10 @@ class Robot:
         self.set_velocity([linear, angular])
 
     def follow_the_wall(self):
-        left = True # False if you want to turn rigth
-        if left is True:
-            k = -1
+        if self.turn_left_mode is True:
+            coef = 1
+        else:
+            coef = -1
         d = self.safe_distance
         min_d = self.min_safe_distance
 
@@ -257,19 +261,19 @@ class Robot:
         if self.state == 1: # 'find the wall'
             if self.regions['fleft']  < min_d or self.regions['left'] < min_d:
                 # WARNING! instead of just 0.3 and 0.2 need to add a new variable 
-                self.set_velocity([0.3, k*0.2])
+                self.set_velocity([0.3, coef*(-0.2)])
             else:
-                self.set_velocity([0.3, k*-0.4])
+                self.set_velocity([0.3, coef*0.4])
         if self.state == 2: # 'turn rigth or left
             if self.regions['front'] < min_d:
-                self.set_velocity([0.2, k*0.5])
+                self.set_velocity([0.2, coef*(-0.5)])
             else:
-                self.set_velocity([0.3, k*0.4])
+                self.set_velocity([0.3, coef*(-0.4)])
         if self.state == 3: # 'follow the wall'
             if self.regions['fleft']  < min_d or self.regions['left'] < min_d:
-                self.set_velocity([0.4, k*0.6])
+                self.set_velocity([0.4, coef*(-0.6)])
             else:
-                self.set_velocity([0.4, k*0.0])
+                self.set_velocity([0.4, coef*(0.0)])
 
     def can_head_toward_goal(self):
         # return True if the bot can head toward the goal or False if it cannot
@@ -377,8 +381,8 @@ class Robot:
         rospy.loginfo('System is shutting down. Stopping %s...' % (self.name) )
         # stop the robot if the system is shutting down
         linear, angular  = 0, 0
-        self.geometry_msg.linear.x = linear
-        self.geometry_msg.angular.z = angular
-        self.velocity_pub.publish(self.geometry_msg)
+        self.vel_msg.linear.x = linear
+        self.vel_msg.angular.z = angular
+        self.velocity_pub.publish(self.vel_msg)
         rospy.loginfo("Stop")
 
