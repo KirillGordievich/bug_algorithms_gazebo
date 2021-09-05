@@ -33,7 +33,7 @@ class Robot:
         self.starting_point = None # for bug1
         self.bug1_steps = {'go to point': True, 'circumnavigate obstacle': False, 'go to closest point': False}
         
-        self.goal = [6.1, 1.5] # x and y coordinates of the goal 
+        self.goal = [-6.1, 1.5] # x and y coordinates of the goal 
         self.initial_position = None # using in bug2 
         self.x = 0.0 # x coordinate of the robot
         self.y = 0.0 # y coordinate of the robot
@@ -87,7 +87,7 @@ class Robot:
         while not rospy.is_shutdown():
             if self.status == 'move':
                 # turn on bug 1 algorithm
-                self.bug_1()
+                self.bug_2()
             else:
                 rospy.loginfo('unknown status')
             linear, angular = self.get_velocity()
@@ -100,6 +100,7 @@ class Robot:
 
     def can_head_toward_goal(self):
         # return True if the robot can head toward the goal or False if it cannot
+        d = self.safe_distance
         err_yaw = self.get_err_yaw()
 
         if (math.fabs(err_yaw) < (math.pi / 6) and 
