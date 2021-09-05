@@ -33,7 +33,7 @@ class Robot:
         self.starting_point = None # for bug1
         self.bug1_steps = {'go to point': True, 'circumnavigate obstacle': False, 'go to closest point': False}
         
-        self.goal = [-6.1, 1.5] # x and y coordinates of the goal 
+        self.goal = [6.1, 1.5] # x and y coordinates of the goal 
         self.initial_position = None # using in bug2 
         self.x = 0.0 # x coordinate of the robot
         self.y = 0.0 # y coordinate of the robot
