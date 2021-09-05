@@ -3,7 +3,6 @@
 import rospy
 import math
 
-
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from turtlesim.msg import Pose
@@ -11,6 +10,10 @@ from turtlesim.msg import Pose
 
 class Robot:
     'class robot'
+    from bug_1 import bug_1
+    from bug_2 import bug_2
+    from callback import callback_pose, callback_laser
+    from motions import go_to_point, follow_the_wall
     def __init__(self):
         self.name = 'two_wheeled_robot' # name of the robot (string)
         self.status = "initialization" # Initialization, wait or move
@@ -42,7 +45,7 @@ class Robot:
 	self.safe_distance = 1.3  # safe distance beetwen the robot and obstacles
         self.min_safe_distance = 0.8  # min safe distance beetwen robot and obstacles
         self.max_linear_velocity = 0.4 # max linear velocity of the robot
-        self.max_angular_velocity = 1.4  # max angular velocity of the robot
+        self.max_angular_velocity = 1.2  # max angular velocity of the robot
         self.distance_precision = 0.25 # if we approach the target at a distance less than this value, we should stop
         self.yaw_precision = math.pi / 45 # +/- 2 degree allowed
         self.max_angle_error = 0.06 # in radians 
@@ -82,193 +85,18 @@ class Robot:
 
         rate = rospy.Rate(self.rate_hz)
         while not rospy.is_shutdown():
-            self.move()
+            if self.status == 'move':
+                # turn on bug 1 algorithm
+                self.bug_1()
+            else:
+                rospy.loginfo('unknown status')
+            linear, angular = self.get_velocity()
+            self.vel_msg.linear.x = linear
+            self.vel_msg.angular.z = angular
+            self.velocity_pub.publish(self.vel_msg)
+
             if not rospy.is_shutdown():
                 rate.sleep()
-
-    def move(self):
-        if self.status == 'move':
-            # turn on bug 1 algorithm
-            self.bug_1()
-        else:
-            rospy.loginfo('unknown status')
-        linear, angular = self.get_velocity()
-        self.vel_msg.linear.x = linear
-        self.vel_msg.angular.z = angular
-        self.velocity_pub.publish(self.vel_msg)
-
-    def bug_1(self):
-        d = self.safe_distance
-        min_d = self.min_safe_distance
-        epsilon = 0.3
-        goal_x, goal_y = self.get_goal()
-        pose_x, pose_y = self.get_pose()
-        # 0 is the "go to point" state
-        if self.state == 0: 
-            # if robot meet an obstacle 
-            if self.regions['front'] < d - epsilon: # try to remove epsilon from here
-                rospy.loginfo('self.regions[front] = %s ' %self.regions['front'])
-                self.count_time = 0
-                self.count_loop = 0
-                self.closest_point = self.get_pose()
-                # if robot meet an obstacle we should circumnavigate it 
-                self.bug1_steps['go to point'] = False
-                self.bug1_steps['circumnavigate obstacle'] = True
-                self.change_state(1)
-            else:
-                self.go_to_point(self.get_goal())
-        # wall follower states
-        elif self.state in [1,2,3]:
-            # first step of bug 1:
-            # if an obstacle is encountered, circumnavigate it 
-            # and remember how close you get to the goal
-            if self.bug1_steps['circumnavigate obstacle'] is True:
-                if self.count_time < 1 and self.count_loop >= 17: # need some time to reach the obstacle to set starting_point 
-                    self.starting_point = self.get_pose()
-                    rospy.loginfo('Starting point = %s' % self.starting_point)               
-                self.follow_the_wall()
-                # if current position is closer to the goal than the previous closest_position, assign current position to closest_point
-                 # get the x and y coordinate of the local goal
-                current_dist = self.get_distance(goal_x, goal_y, pose_x, pose_y)
-                min_dist = self.get_distance(goal_x, goal_y, self.closest_point[0], self.closest_point[1])
-                if current_dist < min_dist:
-                    self.closest_point = [pose_x, pose_y]
-                # compare only after 4 seconds - need some time to get out of starting_point
-                if (self.count_time > 4):
-                    start_x, start_y = self.starting_point
-                    dist_to_start_point = self.get_distance(start_x, start_y, pose_x, pose_y)
-                    rospy.loginfo_throttle(1, 'dist_to_start_point = ' + str(dist_to_start_point))
-                    # if robot reaches (is close to) starting point
-                    if dist_to_start_point < epsilon:
-                        rospy.loginfo('go to the closest point')
-                        self.bug1_steps['circumnavigate obstacle'] = False
-                        self.bug1_steps['go to closest point'] = True # go to closest point  
-            # second step of bug 1
-            # return to the closest point
-            elif self.bug1_steps['go to closest point'] is True:
-                dist_to_closest_point = self.get_distance(self.closest_point[0], self.closest_point[1], pose_x, pose_y)
-                rospy.loginfo_throttle(1, 'distance to the closest point = ' + str(dist_to_closest_point))
-                if dist_to_closest_point < epsilon:
-                    # while robot heading differs from the desired heading by more than the yaw precision 
-                    while math.fabs(self.get_err_yaw()) > self.yaw_precision:
-                        linear, angular = 0, -0.25
-                        self.vel_msg.linear.x = linear
-                        self.vel_msg.angular.z = angular
-                        self.velocity_pub.publish(self.vel_msg)
-                        rospy.loginfo_throttle(1,'Yaw error: [%s]' % self.get_err_yaw())
-                    self.change_state(0)
-                    rospy.loginfo('go to the goal')
-                    self.bug1_steps['go to point'] = True
-                    self.bug1_steps['go to closest point'] = False
-                else:
-                    self.follow_the_wall()
-        else:
-             rospy.loginfo('unknown state or step')
-        # timer
-        self.count_loop += 1
-        if self.count_loop > 20:
-            self.count_time += 1
-            self.count_loop = 0
-        # print basic information 
-        rospy.loginfo_throttle(1, 'state = ' + self.state_dict[self.state] + ', (%s)'% self.state)
-        rospy.loginfo_throttle(1, 'State description = %s' % self.state_description)
-
-    def go_to_point(self, point):
-        d = self.safe_distance
-        min_d = self.min_safe_distance
-        self.state_description = 'case 0 - go to point'
-	x_goal, y_goal = point[0], point[1]
-        pose = self.get_pose()
-        distance = self.get_distance(x_goal, y_goal, pose[0], pose[1])
-        err_yaw = self.get_err_yaw()
-        # stop if the agent is close to the goal
-        if distance < self.distance_precision:
-           self.yaw_past_error = 0
-           linear, angular = 0, 0
-           self.distance_past_error = distance
-           rospy.loginfo('Current position = [%s, %s],  the goal: [%s, %s]' % (pose[0], pose[1], x_goal, y_goal))
-           rospy.signal_shutdown("The goal is reached")
-        # robot heading differs from the desired heading by more than the yaw precision
-        elif math.fabs(err_yaw) < self.yaw_precision:
-            # linear = K*error + D*(present_error - past_error)
-            angular = 0
-            linear = self.k_p*(distance) + self.k_d*abs(distance-self.distance_past_error)
-            self.yaw_past_error = 0
-            self.distance_past_error = distance
-	else:
-            # angular = K*error + D*(present_error - past_error)
-            # linear = K*error + D*(present_error - past_error)
-            # PD controller does not work perfectly
-	    angular = -(err_yaw*self.k_p + self.k_d*abs(err_yaw-self.yaw_past_error))
-            linear = self.k_p*(distance) + self.k_d*abs(distance-self.distance_past_error)
-            self.yaw_past_error = err_yaw
-            self.distance_past_error = distance
-        # speed must not be higher than maximum speed
-        if abs(linear) > self.max_linear_velocity:
-            linear = self.max_linear_velocity
-        if abs(angular) > self.max_angular_velocity:
-            angular = self.max_angular_velocity
-        self.set_velocity([linear, angular])
-
-    def follow_the_wall(self):
-        if self.turn_left_mode is True:
-            coef = 1
-        else:
-            coef = -1
-        d = self.safe_distance
-        min_d = self.min_safe_distance
-
-        if (self.regions['front'] > d and self.regions['fleft'] > d and
-           self.regions['fright'] > d):
-            self.state_description = 'case 1 - nothing'
-            self.change_state(1)
-        elif (self.regions['front'] < d and self.regions['fleft'] > d and
-             self.regions['fright'] > d):
-            self.state_description = 'case 2 - front'
-            self.change_state(2)
-        elif (self.regions['front'] > d and self.regions['fleft'] > d and
-             self.regions['fright'] < d):
-            self.state_description = 'case 3 - fright'
-            self.change_state(3)
-        elif (self.regions['front'] > d and self.regions['fleft'] < d and 
-             self.regions['fright'] > d):
-            self.state_description = 'case 4 - fleft'
-            self.change_state(1)
-        elif (self.regions['front'] < d and self.regions['fleft'] > d and
-             self.regions['fright'] < d):
-            self.state_description = 'case 5 - front and fright'
-            self.change_state(2)
-        elif (self.regions['front'] < d and self.regions['fleft'] < d and
-             self.regions['fright'] > d):
-            self.state_description = 'case 6 - front and fleft'
-            self.change_state(2)
-        elif (self.regions['front'] < d and self.regions['fleft'] < d and
-             self.regions['fright'] < d):
-            self.state_description = 'case 7 - front and fleft and fright'
-            self.change_state(2)
-        elif (self.regions['front'] > d and self.regions['fleft'] < d and
-             self.regions['fright'] < d):
-            self.state_description = 'case 8 - fleft and fright'
-            self.change_state(1)
-        else:
-            self.state_description = 'unknown case'
-
-        if self.state == 1: # 'find the wall'
-            if self.regions['fleft']  < min_d or self.regions['left'] < min_d:
-                # WARNING! instead of just 0.3 and 0.2 need to add a new variable 
-                self.set_velocity([0.3, coef*(-0.2)])
-            else:
-                self.set_velocity([0.3, coef*0.4])
-        if self.state == 2: # 'turn rigth or left
-            if self.regions['front'] < min_d:
-                self.set_velocity([0.2, coef*(-0.5)])
-            else:
-                self.set_velocity([0.3, coef*(-0.4)])
-        if self.state == 3: # 'follow the wall'
-            if self.regions['fleft']  < min_d or self.regions['left'] < min_d:
-                self.set_velocity([0.4, coef*(-0.6)])
-            else:
-                self.set_velocity([0.4, coef*(0.0)])
 
     def can_head_toward_goal(self):
         # return True if the robot can head toward the goal or False if it cannot
@@ -339,26 +167,6 @@ class Robot:
     def get_pose(self):
         # return the pose of the bot
         return [self.x, self.y]
-
-    def callback_pose(self, data):
-        self.x = data.x
-        self.y = data.y 
-        self.yaw = data.theta
-        # if the status is initialization
-        # save the initial position
-        if self.status == 'initialization':
-            self.initial_position = [data.x, data.y]
-
-    def callback_laser(self, data):
-        # split laser data into 5 regions
-        # 'right', 'fright', 'front', 'fleft' and 'left'
-        self.regions = {
-            'right':  min(min(data.ranges[0:143]), 10),
-            'fright': min(min(data.ranges[144:287]), 10),
-            'front':  min(min(data.ranges[288:431]), 10),
-            'fleft':  min(min(data.ranges[432:575]), 10),
-            'left':   min(min(data.ranges[576:719]), 10),
-        }
 
     def clean_shutdown(self):
         # Stop robot when shutting down 
