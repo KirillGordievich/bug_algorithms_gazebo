@@ -16,8 +16,8 @@ class Robot:
 
         self.rate_hz = 20 # Refresh Rate of the main method
 
-        self.state = 0
-        self.state_description = 'start'
+        self.state = 0 # 0, 1, 2 or 3 (int), 0 = go to point, 1,2,3 = wall follower
+        self.state_description = 'start' # short descriprion of the state
         self.state_dict = {1: 'find the wall', 2: 'turn left', 3: 'follow the wall', 0: 'go to point'}
 
         self.count_time = 0 # using count_time to count seconds the robot is in a state 
@@ -29,7 +29,7 @@ class Robot:
 
         
         self.goal = [6.1, 1.5] # x and y coordinates of the goal 
-        self.initial_position = [0, 0]
+        self.initial_position = None
         self.x = 0.0 # x coordinate of the robot
         self.y = 0.0 # y coordinate of the robot
         self.yaw = 0.0 # oriention of the robot
@@ -55,7 +55,7 @@ class Robot:
 
         self.regions = {'right': None, 'fright': None, 'front': None, 'fleft': None, 'left': None}
 
-        self.geometry_msg = geometry_msgs.msg.Twist() # velocity msgs
+        self.vel_msg = geometry_msgs.msg.Twist() # velocity msgs
         # register pub to send twist velocity 
         self.velocity_pub = rospy.Publisher("/" + self.name + "/cmd_vel", 
                                                   geometry_msgs.msg.Twist, queue_size=10)
@@ -70,9 +70,9 @@ class Robot:
 
     def main(self):
         while None in self.regions.values(): # waint until receive laser data
-            rospy.sleep(1)
+            rospy.sleep(2) # waint 2 sec
         rospy.loginfo('laser data is received, go')
-        self.change_status('move')
+        self.change_status('move') # change from initialization to move 
         rospy.loginfo('Initialization is done')
         rospy.loginfo('Initial position of the robot = %s' % self.initial_position)
 
@@ -89,9 +89,9 @@ class Robot:
         else:
             rospy.loginfo('unknown status')
         linear, angular = self.get_velocity()
-        self.geometry_msg.linear.x = linear
-        self.geometry_msg.angular.z = angular
-        self.velocity_pub.publish(self.geometry_msg)
+        self.vel_msg.linear.x = linear
+        self.vel.angular.z = angular
+        self.velocity_pub.publish(self.vel_msg)
 
     def bug_1(self):
         d = self.safe_distance
@@ -146,9 +146,9 @@ class Robot:
                 if dist_to_closest_point < epsilon:
                     while math.fabs(self.get_err_yaw()) > self.yaw_precision:
                         linear, angular = 0, -0.25
-                        self.geometry_msg.linear.x = linear
-                        self.geometry_msg.angular.z = angular
-                        self.velocity_pub.publish(self.geometry_msg)
+                        self.vel_msg.linear.x = linear
+                        self.vel_msg.angular.z = angular
+                        self.velocity_pub.publish(self.vel_msg)
                         rospy.loginfo('Yaw error: [%s]' % self.get_err_yaw())
                     self.change_state(0)
                     rospy.loginfo('go to the goal')
@@ -184,6 +184,7 @@ class Robot:
         pose = self.get_pose()
         distance = self.get_distance(x_goal, y_goal, pose[0], pose[1])
         angle = self.get_angle(x_goal, y_goal)
+        rospy.loginfo('angle, get_err_yaw = [%s, %s]' % (angle, get_err_yaw()))
         # stop if the agent is close to the goal
         if distance < self.distance_precision:
            self.angle_past_error = 0
@@ -334,10 +335,11 @@ class Robot:
         distance = up_eq / lo_eq
         return distance
 
-    def get_pose(self): 
-        return [self.x, self.y] # return the pose of the bot
+    def get_pose(self):
+        # return the pose of the bot
+        return [self.x, self.y]
            
-    def get_angle(self, x, y): # WARNING for some reason it works wrong sometime!!! 
+    def get_angle(self, x, y):
         # get the angle between OX
         # and the line agent and goal points
         phi = math.atan2(y-self.y, x-self.x)
@@ -354,10 +356,14 @@ class Robot:
         self.x = data.x
         self.y = data.y 
         self.yaw = data.theta
+        # if the status is initialization
+        # save the initial position
         if self.status == 'initialization':
             self.initial_position = [data.x, data.y]
 
-    def callback_laser(self, data): # split laser data into 5 regions
+    def callback_laser(self, data):
+        # split laser data into 5 regions
+        # 'right', 'fright', 'front', 'fleft' and 'left'
         self.regions = {
             'right':  min(min(data.ranges[0:143]), 10),
             'fright': min(min(data.ranges[144:287]), 10),
@@ -367,7 +373,7 @@ class Robot:
         }
 
     def clean_shutdown(self):
-        ''' Stop robot when shutting down '''
+        # Stop robot when shutting down 
         rospy.loginfo('System is shutting down. Stopping %s...' % (self.name) )
         # stop the robot if the system is shutting down
         linear, angular  = 0, 0
