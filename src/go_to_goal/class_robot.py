@@ -2,35 +2,36 @@
 
 import rospy
 import math
-import random
-import geometry_msgs.msg
-import re
+
+
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from turtlesim.msg import Pose
 
 
 class Robot:
+    'class robot'
     def __init__(self):
         self.name = 'two_wheeled_robot' # name of the robot (string)
         self.status = "initialization" # Initialization, wait or move
 
         self.rate_hz = 20 # Refresh Rate of the main method
 
+        self.turn_left_mode = True # False if you want to turn rigth
+
         self.state = 0 # 0, 1, 2 or 3 (int), 0 = go to point, 1,2,3 = wall follower
         self.state_description = 'start' # short descriprion of the state
-        self.state_dict = {1: 'find the wall', 2: 'turn left', 3: 'follow the wall', 0: 'go to point'}
+        self.state_dict = {0: 'go to point', 1: 'find the wall', 2: 'turn left', 3: 'follow the wall'}
 
         self.count_time = 0 # using count_time to count seconds the robot is in a state 
-        self.count_loop = 0 # using in timer
+        self.count_loop = 0 # using in timer 
   
-        self.turn_left_mode = True # False if you want to turn rigth
         self.closest_point = None # for bug1
         self.starting_point = None # for bug1
         self.bug1_steps = {'go to point': True, 'circumnavigate obstacle': False, 'go to closest point': False}
-
         
         self.goal = [6.1, 1.5] # x and y coordinates of the goal 
-        self.initial_position = None
+        self.initial_position = None # using in bug2 
         self.x = 0.0 # x coordinate of the robot
         self.y = 0.0 # y coordinate of the robot
         self.yaw = 0.0 # oriention of the robot
@@ -41,7 +42,7 @@ class Robot:
 	self.safe_distance = 1.3  # safe distance beetwen the robot and obstacles
         self.min_safe_distance = 0.8  # min safe distance beetwen robot and obstacles
         self.max_linear_velocity = 0.4 # max linear velocity of the robot
-        self.max_angular_velocity = 2  # max angular velocity of the robot
+        self.max_angular_velocity = 1.4  # max angular velocity of the robot
         self.distance_precision = 0.25 # if we approach the target at a distance less than this value, we should stop
         self.yaw_precision = math.pi / 45 # +/- 2 degree allowed
         self.max_angle_error = 0.06 # in radians 
@@ -54,15 +55,17 @@ class Robot:
         self.k_p = 0.5 # the coefficient for the proportional terms
         self.k_d = 0.2 # the coefficient for the derivative term
 
+        # this dictionary contain distance to the closest obstacle 
+        # in different regions around the robot (front, right, etc)
         self.regions = {'right': None, 'fright': None, 'front': None, 'fleft': None, 'left': None}
-
-        self.vel_msg = geometry_msgs.msg.Twist() # velocity msgs
+        # velocity msgs
+        self.vel_msg = Twist()
         # register pub to send twist velocity 
-        self.velocity_pub = rospy.Publisher("/" + self.name + "/cmd_vel", 
-                                                  geometry_msgs.msg.Twist, queue_size=10)
+        self.velocity_pub = rospy.Publisher("/" + self.name + "/cmd_vel", Twist, 
+                                            queue_size=10)
         # register sub to get the robot pose
-        self.pose_subscriber = rospy.Subscriber("/" + self.name + '/pose', 
-                                                Pose, self.callback_pose, queue_size=6)
+        self.pose_subscriber = rospy.Subscriber("/" + self.name + '/pose', Pose, 
+                                                self.callback_pose, queue_size=6)
         # register sub to get the laser data of the robot
         self.pose_subscriber = rospy.Subscriber("/" + self.name + '/laser/scan', 
                                                 LaserScan, self.callback_laser)
@@ -100,14 +103,15 @@ class Robot:
         epsilon = 0.3
         goal_x, goal_y = self.get_goal()
         pose_x, pose_y = self.get_pose()
-
-        if self.state == 0: # go to point
-            # if meet an obstacle 
-            if self.regions['front'] < d - epsilon: # REMOVE EPSILON! and try to move self.closest_point = self.get_pose() to the next condition
+        # 0 is the "go to point" state
+        if self.state == 0: 
+            # if robot meet an obstacle 
+            if self.regions['front'] < d - epsilon: # try to remove epsilon from here
                 rospy.loginfo('self.regions[front] = %s ' %self.regions['front'])
                 self.count_time = 0
                 self.count_loop = 0
                 self.closest_point = self.get_pose()
+                # if robot meet an obstacle we should circumnavigate it 
                 self.bug1_steps['go to point'] = False
                 self.bug1_steps['circumnavigate obstacle'] = True
                 self.change_state(1)
@@ -119,7 +123,7 @@ class Robot:
             # if an obstacle is encountered, circumnavigate it 
             # and remember how close you get to the goal
             if self.bug1_steps['circumnavigate obstacle'] is True:
-                if (self.count_time < 1 and self.count_loop > 9 and self.count_loop < 13): # need some time to reach the obstacle to set starting_point 0.5-0.6 sec
+                if self.count_time < 1 and self.count_loop >= 17: # need some time to reach the obstacle to set starting_point 
                     self.starting_point = self.get_pose()
                     rospy.loginfo('Starting point = %s' % self.starting_point)               
                 self.follow_the_wall()
@@ -151,7 +155,7 @@ class Robot:
                         self.vel_msg.linear.x = linear
                         self.vel_msg.angular.z = angular
                         self.velocity_pub.publish(self.vel_msg)
-                        rospy.loginfo('Yaw error: [%s]' % self.get_err_yaw())
+                        rospy.loginfo_throttle(1,'Yaw error: [%s]' % self.get_err_yaw())
                     self.change_state(0)
                     rospy.loginfo('go to the goal')
                     self.bug1_steps['go to point'] = True
@@ -169,15 +173,6 @@ class Robot:
         rospy.loginfo_throttle(1, 'state = ' + self.state_dict[self.state] + ', (%s)'% self.state)
         rospy.loginfo_throttle(1, 'State description = %s' % self.state_description)
 
-    def get_err_yaw(self): 
-        # maybe i should delete this function 
-        # because i already have get_error_angle and get_angle 
-        goal_x, goal_y = self.get_goal()
-        pose_x, pose_y = self.get_pose()
-        desired_yaw = math.atan2(goal_y - pose_y, goal_x - pose_x)
-        err_yaw = desired_yaw - self.yaw
-        return err_yaw
-
     def go_to_point(self, point):
         d = self.safe_distance
         min_d = self.min_safe_distance
@@ -192,7 +187,6 @@ class Robot:
            linear, angular = 0, 0
            self.distance_past_error = distance
            rospy.loginfo('Current position = [%s, %s],  the goal: [%s, %s]' % (pose[0], pose[1], x_goal, y_goal))
-           self.goal = [-6.1, 1.5]   
            rospy.signal_shutdown("The goal is reached")
         # robot heading differs from the desired heading by more than the yaw precision
         elif math.fabs(err_yaw) < self.yaw_precision:
@@ -204,6 +198,7 @@ class Robot:
 	else:
             # angular = K*error + D*(present_error - past_error)
             # linear = K*error + D*(present_error - past_error)
+            # PD controller does not work perfectly
 	    angular = -(err_yaw*self.k_p + self.k_d*abs(err_yaw-self.yaw_past_error))
             linear = self.k_p*(distance) + self.k_d*abs(distance-self.distance_past_error)
             self.yaw_past_error = err_yaw
@@ -276,13 +271,8 @@ class Robot:
                 self.set_velocity([0.4, coef*(0.0)])
 
     def can_head_toward_goal(self):
-        # return True if the bot can head toward the goal or False if it cannot
-        d = self.safe_distance
-        goal_x, goal_y = self.get_goal()
-
-        desired_yaw = math.atan2(goal_y - self.y, goal_x - self.x)
-        yaw = self.yaw
-        err_yaw = desired_yaw - yaw
+        # return True if the robot can head toward the goal or False if it cannot
+        err_yaw = self.get_err_yaw()
 
         if (math.fabs(err_yaw) < (math.pi / 6) and 
             self.regions['front'] > d):
@@ -317,7 +307,14 @@ class Robot:
     def get_velocity(self):
         return self.linear_velocity, self.angular_velocity  
 
-    def get_goal(self): # need to add trade function
+    def get_err_yaw(self): 
+        goal_x, goal_y = self.get_goal()
+        pose_x, pose_y = self.get_pose()
+        desired_yaw = math.atan2(goal_y - pose_y, goal_x - pose_x)
+        err_yaw = desired_yaw - self.yaw
+        return err_yaw
+
+    def get_goal(self):
 	return self.goal
 
     def get_distance(self, x1, y1, x2, y2):
@@ -325,7 +322,7 @@ class Robot:
         return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
     def get_yaw(self):
-        # get yaw of the agent 
+        # get yaw of the robot 
         return self.yaw
 
     def get_distance_to_line(self, p0): # using in bug2
@@ -342,19 +339,6 @@ class Robot:
     def get_pose(self):
         # return the pose of the bot
         return [self.x, self.y]
-           
-    def get_angle(self, x, y):
-        # get the angle between OX
-        # and the line agent and goal points
-        phi = math.atan2(y-self.y, x-self.x)
-        yaw = self.get_yaw()
-
-        angle = self.get_error_angle(yaw, phi)
-        return angle
-
-    def get_error_angle(self, angle1, angle2):
-        # get the real angle between two angle 
-        return math.atan2(math.sin(angle2-angle1), math.cos(angle2-angle1))
 
     def callback_pose(self, data):
         self.x = data.x
