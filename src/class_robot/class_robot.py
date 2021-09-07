@@ -48,7 +48,6 @@ class Robot:
         self.max_angular_velocity = 1.2  # max angular velocity of the robot
         self.distance_precision = 0.25 # if we approach the target at a distance less than this value, we should stop
         self.yaw_precision = math.pi / 45 # +/- 2 degree allowed
-        self.max_angle_error = 0.06 # in radians 
  
         # for PD controller
         self.yaw_past_error = 0 
@@ -136,12 +135,6 @@ class Robot:
     def get_velocity(self):
         return self.linear_velocity, self.angular_velocity  
 
-    def get_err_yaw(self): 
-        goal_x, goal_y = self.get_goal()
-        pose_x, pose_y = self.get_pose()
-        desired_yaw = math.atan2(goal_y - pose_y, goal_x - pose_x)
-        err_yaw = desired_yaw - self.yaw
-        return err_yaw
 
     def get_goal(self):
 	return self.goal
@@ -149,6 +142,13 @@ class Robot:
     def get_distance(self, x1, y1, x2, y2):
         # the distance between two points (X1, y1) and (x2, y2)
         return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+    def get_err_yaw(self): 
+        goal_x, goal_y = self.get_goal()
+        pose_x, pose_y = self.get_pose()
+        desired_yaw = math.atan2(goal_y - pose_y, goal_x - pose_x)
+        err_yaw = desired_yaw - self.yaw
+        return err_yaw
 
     def get_yaw(self):
         # get yaw of the robot 
