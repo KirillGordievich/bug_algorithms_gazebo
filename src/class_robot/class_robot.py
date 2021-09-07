@@ -10,6 +10,7 @@ from turtlesim.msg import Pose
 
 class Robot:
     'class robot'
+    from bug_0 import bug_0
     from bug_1 import bug_1
     from bug_2 import bug_2
     from callback import callback_pose, callback_laser
@@ -85,8 +86,11 @@ class Robot:
         rate = rospy.Rate(self.rate_hz)
         while not rospy.is_shutdown():
             if self.status == 'move':
-                # turn on bug 1 algorithm
+                # turn on bug 2 algorithm
                 self.bug_2()
+                # uncomment to turn on bug1 or bug 0
+                #self.bug_1() 
+                #self.bug_0()
             else:
                 rospy.loginfo('unknown status')
             linear, angular = self.get_velocity()
